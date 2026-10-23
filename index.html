@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Klinik">
+<meta name="robots" content="noindex,nofollow">
+<title>Klinik Takip</title>
+<style>
+:root{--bg:#eef2f1;--c:#fff;--t:#1f2a2e;--m:#6a7a7e;--p:#0f6b6b;--bad:#b3402f;--ok:#1f7a4d;--b:#d8e0df}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1415;--c:#182022;--t:#e8efee;--m:#8fa0a3;--p:#4fb3b0;--bad:#e8765f;--ok:#5fc08c;--b:#2a3638}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--t);font:16px/1.4 -apple-system,system-ui,sans-serif}
+main{padding:calc(14px + env(safe-area-inset-top)) 14px 100px;max-width:680px;margin:auto}
+h2{font:600 28px ui-serif,"New York",Georgia,serif;margin:6px 0 12px}
+h3{font:600 18px ui-serif,"New York",Georgia,serif;margin:18px 0 8px}
+.card{background:var(--c);border:1px solid var(--b);border-radius:12px;padding:12px;margin:0 0 10px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.m,small{color:var(--m);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.grid .card{padding:10px;margin:0}.grid b{display:block;font-size:15px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}.g2 b{display:block;font-size:20px}
+input,select{width:100%;padding:11px;margin:4px 0;border:1px solid var(--b);border-radius:10px;font:inherit;background:var(--bg);color:var(--t)}
+button{width:100%;padding:12px;margin:6px 0;border:0;border-radius:10px;background:var(--p);color:#fff;font:600 16px inherit;font-family:inherit}
+@media(prefers-color-scheme:dark){button{color:#08201f}}
+button.lnk{background:none;color:var(--p);width:auto;padding:6px 0}
+button.del{background:none;color:var(--bad);margin-top:20px}
+.bad{color:var(--bad);font-weight:600}.ok{color:var(--ok)}
+.x{color:var(--m);padding:4px 8px;cursor:pointer}
+.err{color:var(--bad);margin:8px 0}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--c);border-top:1px solid var(--b);padding-bottom:env(safe-area-inset-bottom)}
+nav button{background:none;color:var(--m);border-radius:0;margin:0;padding:14px 4px}
+nav button.on{color:var(--p)}
+.past{opacity:.55}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth,onAuthStateChanged,signInWithEmailAndPassword,signOut} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,collection,onSnapshot,addDoc,deleteDoc,doc} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDizbYvzce07-j8akD1s6TzyP4VooGANd4",
+  authDomain: "vo-klinik.firebaseapp.com",
+  projectId: "vo-klinik",
+  storageBucket: "vo-klinik.firebasestorage.app",
+  messagingSenderId: "592341125554",
+  appId: "1:592341125554:web:f016d0e3016a455b4e3cab"
+};
+const fb=initializeApp(firebaseConfig),auth=getAuth(fb),db=getFirestore(fb);
+const C={pat:'patients',trt:'treatments',pay:'payments',apt:'appointments'};
+function td(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+const S={u:null,pat:[],trt:[],pay:[],apt:[],tab:'pat',sel:null,q:'',d:td(),m:td().slice(0,7),err:''};
+const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const tl=n=>(Number(n)||0).toLocaleString('tr-TR')+' ₺';
+const sum=a=>a.reduce((s,x)=>s+(+x.amt||0),0);
+const fmt=d=>String(d).split('-').reverse().join('.');
+const v=id=>document.getElementById(id).value.trim();
+const billed=id=>sum(S.trt.filter(x=>x.pid===id)),paid=id=>sum(S.pay.filter(x=>x.pid===id)),debt=id=>billed(id)-paid(id);
+const TYPES=['Dolgu','Botoks','Mezoterapi','Diğer'],METHODS=['Nakit','Kart','Havale','Taksit'];
+const opts=a=>a.map(x=>`<option>${x}</option>`).join('');
+
+let unsubs=[];
+onAuthStateChanged(auth,u=>{
+  S.u=u;unsubs.forEach(f=>f());unsubs=[];S.err='';
+  if(u){for(const k in C)unsubs.push(onSnapshot(collection(db,C[k]),s=>{S[k]=s.docs.map(d=>({id:d.id,...d.data()}));render()},er=>{S.err='Veri okunamadı ('+er.code+'). Firestore kurallarını kontrol edin.';render()}))}
+  render();
+});
+
+function loginView(){return `<main><h2>Klinik Takip</h2><div class="card"><input id="em" type="email" placeholder="E-posta" autocapitalize="none" autocomplete="username"><input id="pw" type="password" placeholder="Şifre" autocomplete="current-password"><button onclick="A.login()">Giriş yap</button><div class="err">${e(S.err)}</div></div></main>`}
+
+const plist=()=>{const q=S.q.toLowerCase();
+  return S.pat.filter(p=>((p.name||'')+' '+(p.tel||'')).toLowerCase().includes(q)).sort((a,b)=>(a.name||'').localeCompare(b.name||'','tr'))
+  .map(p=>{const d=debt(p.id);return `<div class="card row" onclick="A.open('${p.id}')"><div><b>${e(p.name)}</b><div class="m">${e(p.tel)}</div></div>${d>0?`<span class="bad">${tl(d)}</span>`:''}</div>`}).join('')||'<p class="m">Eşleşen hasta yok. Yukarıdan yeni hasta ekleyebilirsiniz.</p>'};
+
+const listView=()=>`<h2>Hastalar</h2><input id="sq" type="search" placeholder="Ad veya telefon ara" value="${e(S.q)}" oninput="A.q(this.value)"><div id="pl">${plist()}</div>
+<h3>Yeni hasta</h3><div class="card"><input id="pn" placeholder="Ad soyad"><input id="pt" type="tel" placeholder="Telefon"><input id="pm" placeholder="Not (alerji, tercih...)"><button onclick="A.addPat()">Hastayı kaydet</button></div>`;
+
+function patView(){
+  const p=S.pat.find(x=>x.id===S.sel);if(!p){S.sel=null;return listView()}
+  const b=billed(p.id),pd=paid(p.id);
+  const h=[...S.trt.filter(x=>x.pid===p.id).map(x=>({...x,k:'trt'})),...S.pay.filter(x=>x.pid===p.id).map(x=>({...x,k:'pay'}))].sort((x,y)=>(y.date||'').localeCompare(x.date||'')||(y.at||0)-(x.at||0));
+  const ap=S.apt.filter(x=>x.pid===p.id&&x.date>=td()).sort((x,y)=>(x.date+x.time).localeCompare(y.date+y.time))[0];
+  return `<button class="lnk" onclick="A.back()">‹ Hastalar</button><h2>${e(p.name)}</h2><div class="m">${e(p.tel)} ${e(p.note)}</div>${ap?`<div class="m">Sonraki randevu: ${fmt(ap.date)} ${e(ap.time)}</div>`:''}
+<div class="grid" style="margin-top:10px"><div class="card"><small>İşlem toplamı</small><b>${tl(b)}</b></div><div class="card"><small>Ödenen</small><b>${tl(pd)}</b></div><div class="card"><small>Kalan borç</small><b class="${b-pd>0?'bad':'ok'}">${tl(b-pd)}</b></div></div>
+<h3>İşlem ekle</h3><div class="card"><select id="tT">${opts(TYPES)}</select><input id="tA" type="number" inputmode="decimal" placeholder="Tutar (₺)"><input id="tD" type="date" value="${td()}"><input id="tN" placeholder="Not (bölge, ürün, miktar...)"><button onclick="A.addTrt()">İşlemi kaydet</button></div>
+<h3>Ödeme ekle</h3><div class="card"><input id="pA" type="number" inputmode="decimal" placeholder="Tutar (₺)"><select id="pM">${opts(METHODS)}</select><input id="pD" type="date" value="${td()}"><input id="pN" placeholder="Not (taksit sayısı...)"><button onclick="A.addPay()">Ödemeyi kaydet</button></div>
+<h3>Geçmiş</h3>${h.map(x=>`<div class="card row"><div><b>${x.k==='trt'?e(x.type):'Ödeme: '+e(x.method)}</b><div class="m">${fmt(x.date)} ${e(x.note)}</div></div><div class="${x.k==='pay'?'ok':''}">${x.k==='pay'?'+':''}${tl(x.amt)}<span class="x" onclick="A.del('${x.k}','${x.id}')">✕</span></div></div>`).join('')||'<p class="m">Bu hastaya henüz işlem veya ödeme eklenmedi.</p>'}
+<button class="del" onclick="A.delPat('${p.id}')">Hastayı ve tüm kayıtlarını sil</button>`}
+
+function aptView(){
+  const t=td(),l=[...S.apt].sort((x,y)=>(x.date+x.time).localeCompare(y.date+y.time));
+  const up=l.filter(x=>x.date>=t),past=l.filter(x=>x.date<t).reverse().slice(0,15);
+  const row=(x,c)=>{const p=S.pat.find(z=>z.id===x.pid);return `<div class="card row ${c}"><div onclick="A.open('${x.pid}')"><b>${e(x.time)} ${e(p?p.name:'Silinmiş hasta')}</b><div class="m">${fmt(x.date)}${x.date===t?' (bugün)':''} ${e(x.type)} ${e(x.note)}</div></div><span class="x" onclick="A.del('apt','${x.id}')">✕</span></div>`};
+  return `<h2>Takvim</h2><div class="card">${S.pat.length?`<select id="aP">${S.pat.slice().sort((x,y)=>(x.name||'').localeCompare(y.name||'','tr')).map(p=>`<option value="${p.id}">${e(p.name)}</option>`).join('')}</select><input id="aD" type="date" value="${t}"><input id="aT" type="time" value="10:00"><select id="aY">${opts(TYPES.concat(['Kontrol']))}</select><input id="aN" placeholder="Not"><button onclick="A.addApt()">Randevu ekle</button>`:'<p class="m">Randevu eklemek için önce Hastalar sekmesinden hasta ekleyin.</p>'}</div>
+<h3>Yaklaşan</h3>${up.map(x=>row(x,'')).join('')||'<p class="m">Yaklaşan randevu yok.</p>'}
+${past.length?`<h3>Geçmiş</h3>${past.map(x=>row(x,'past')).join('')}`:''}`}
+
+function revView(){
+  const dp=S.pay.filter(x=>x.date===S.d),dt=S.trt.filter(x=>x.date===S.d),mp=S.pay.filter(x=>(x.date||'').startsWith(S.m)),mt=S.trt.filter(x=>(x.date||'').startsWith(S.m));
+  const open=S.pat.reduce((s,p)=>s+Math.max(0,debt(p.id)),0);
+  return `<h2>Ciro</h2><h3>Günlük</h3><div class="card"><input type="date" value="${S.d}" onchange="A.set('d',this.value||td())"><div class="g2"><div><small>Tahsilat</small><b>${tl(sum(dp))}</b></div><div><small>Yapılan işlem</small><b>${tl(sum(dt))}</b></div></div></div>
+<h3>Aylık</h3><div class="card"><input type="month" value="${S.m}" onchange="A.set('m',this.value||td().slice(0,7))"><div class="g2"><div><small>Tahsilat</small><b>${tl(sum(mp))}</b></div><div><small>Yapılan işlem</small><b>${tl(sum(mt))}</b></div></div>
+${METHODS.map(k=>`<div class="row" style="margin-top:8px"><span class="m">${k}</span><span>${tl(sum(mp.filter(x=>x.method===k)))}</span></div>`).join('')}</div>
+<div class="card"><small>Tüm hastaların toplam açık borcu</small><div class="bad" style="font-size:22px">${tl(open)}</div></div>
+<button onclick="A.bak()">Yedeği indir</button><button class="lnk" onclick="A.out()">Çıkış yap</button>`}
+
+function render(){
+  const a=document.getElementById('app');
+  if(!S.u){a.innerHTML=loginView();return}
+  const view=S.sel?patView():S.tab==='apt'?aptView():S.tab==='rev'?revView():listView();
+  const nb=(k,n)=>`<button class="${S.tab===k&&!S.sel?'on':''}" onclick="A.tab('${k}')">${n}</button>`;
+  a.innerHTML=`<main>${S.err?`<div class="err">${e(S.err)}</div>`:''}${view}</main><nav>${nb('pat','Hastalar')}${nb('apt','Takvim')}${nb('rev','Ciro')}</nav>`;
+}
+
+const num=id=>parseFloat(v(id).replace(',','.'));
+const add=(k,d)=>addDoc(collection(db,C[k]),{...d,at:Date.now()}).catch(er=>{S.err='Kaydedilemedi ('+er.code+')';render()});
+window.A={
+  login(){signInWithEmailAndPassword(auth,v('em'),document.getElementById('pw').value).catch(()=>{S.err='E-posta veya şifre hatalı.';render()})},
+  out(){signOut(auth)},
+  tab(t){S.tab=t;S.sel=null;render();scrollTo(0,0)},
+  open(id){S.sel=id;render();scrollTo(0,0)},
+  back(){S.sel=null;S.tab='pat';render()},
+  set(k,x){S[k]=x;render()},
+  q(x){S.q=x;document.getElementById('pl').innerHTML=plist()},
+  addPat(){const n=v('pn');if(!n)return alert('Ad soyad yazın.');add('pat',{name:n,tel:v('pt'),note:v('pm')})},
+  addTrt(){const a=num('tA');if(!(a>=0))return alert('Tutarı yazın.');add('trt',{pid:S.sel,type:v('tT'),amt:a,date:v('tD')||td(),note:v('tN')})},
+  addPay(){const a=num('pA');if(!(a>0))return alert('Tutarı yazın.');add('pay',{pid:S.sel,amt:a,method:v('pM'),date:v('pD')||td(),note:v('pN')})},
+  addApt(){add('apt',{pid:v('aP'),date:v('aD')||td(),time:v('aT')||'10:00',type:v('aY'),note:v('aN')})},
+  del(k,id){if(confirm('Bu kayıt silinsin mi?'))deleteDoc(doc(db,C[k],id))},
+  delPat(id){if(!confirm('Hasta ve tüm işlem, ödeme, randevu kayıtları silinsin mi? Geri alınamaz.'))return;
+    ['trt','pay','apt'].forEach(k=>S[k].filter(x=>x.pid===id).forEach(x=>deleteDoc(doc(db,C[k],x.id))));
+    deleteDoc(doc(db,C.pat,id));S.sel=null;render()},
+  bak(){const j=JSON.stringify({tarih:td(),hastalar:S.pat,islemler:S.trt,odemeler:S.pay,randevular:S.apt},null,1);
+    const l=document.createElement('a');l.href=URL.createObjectURL(new Blob([j],{type:'application/json'}));l.download='klinik-yedek-'+td()+'.json';l.click()}
+};
+</script>
+</body>
+</html>
